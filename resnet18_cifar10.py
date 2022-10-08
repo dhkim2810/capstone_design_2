@@ -1,5 +1,3 @@
-import enum
-from statistics import correlation
 import torch
 import torchvision as tv
 from torchvision import models, datasets
