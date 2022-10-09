@@ -1,34 +1,35 @@
-from mlp import MLP
-from lenet import LeNet
-from alexnet import AlexNet
-from convnet import ConvNet
-from vgg import VGG
-import resnet
+from .mlp import MLP
+from .lenet import LeNet
+from .alexnet import AlexNet
+from .convnet import ConvNet
+from .vgg import VGG
+from .resnet import ResNet18, ResNet18BN, ResNet18BN_AP
 
 class ModelWrapper():
-    def __init__(self, channel, num_classes, **kwargs):
-        self.channel = channel
-        self.num_classes = num_classes
+    def __init__(self, model, **kwargs):
+        self.channel = kwargs.get('channel', 3)
+        self.num_classes = kwargs.get('num_classes', 10)
         self.img_size = kwargs.get("image_size", (32,32))
+        self.set_model(model)
     
-    def get_model(self, model):
+    def set_model(self, model):
         if model == 'MLP':
-            net = MLP(self.channel, self.num_classes)
+            self.net = MLP(self.channel, self.num_classes)
         elif model == 'LeNet':
-            net = LeNet(self.channel, self.num_classes)
-        elif model == 'AlexNet':
-            net = AlexNet(self.channel, self.num_classes)
-        elif 'ConvNet' in model:
+            self.net = LeNet(self.channel, self.num_classes)
+        elif model == 'Alexself.net':
+            self.net = AlexNet(self.channel, self.num_classes)
+        elif 'Convself.net' in model:
             net_width, net_depth, net_act, net_norm, net_pooling = self.get_ConvNet_config(model)
-            net = ConvNet(self.channel, self.num_classes, net_width, net_depth, net_act, net_norm, net_pooling, self.img_size)
+            self.net = ConvNet(self.channel, self.num_classes, net_width, net_depth, net_act, net_norm, net_pooling, self.img_size)
         elif 'VGG' in model:
-            net = VGG(model, self.channel, self.num_classes, norm='batchnorm' if 'BN' in model else 'instancenorm')
+            self.net = VGG(model, self.channel, self.num_classes, norm='batchnorm' if 'BN' in model else 'instancenorm')
         elif model == 'ResNet18':
-            net = resnet.ResNet18(self.channel, self.num_classes)
+            self.net = ResNet18(self.channel, self.num_classes)
         elif model == 'ResNet18BN':
-            net = resnet.ResNet18BN(self.channel, self.num_classes)
+            self.net = ResNet18BN(self.channel, self.num_classes)
         elif model == 'ResNet18BN_AP':
-            net = resnet.ResNet18BN_AP(self.channel, self.num_classes)
+            self.net = ResNet18BN_AP(self.channel, self.num_classes)
     
     def get_ConvNet_config(self, model):
         net_width = 128

@@ -268,8 +268,11 @@
 #     config = parser.parse_args()
 #     main(config)
 
-
+import os
+import logging
+import numpy as np
 import pytorch_lightning as pl
+import logging
 
 from data.data_module import DataModule
 
@@ -289,9 +292,11 @@ def main(args):
     dm = DataModule(args.dataset, args.data_dir, args.batch_size, args.num_workers, augmentation)
 
     # build model
-    model = Pretrainer(**args.__dict__)
+    model = Model(**args.__dict__)
     
     # Train model
+    for exp in range(args.num_exp):
+        logging.info('\n================== Exp %d ==================\n '%exp)
     trainer = pl.Trainer.from_argparse_args(
         args, logger=wandb_logger, callbacks=[CheckpointCallback()], accelerator='dp'
     )

@@ -72,8 +72,8 @@ class DataModule():
             mean = [0.2861]
             std = [0.3530]
             self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]) if self.transform is None else self.transform
-            dst_train = datasets.MNIST(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
-            dst_test = datasets.MNIST(self.data_dir, train=False, download=True, transform=self.transform)
+            dst_train = datasets.FashionMNIST(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
+            dst_test = datasets.FashionMNIST(self.data_dir, train=False, download=True, transform=self.transform)
             class_names = dst_train.classes
 
         elif self.dataset == 'SVHN':
@@ -83,8 +83,8 @@ class DataModule():
             mean = [0.4377, 0.4438, 0.4728]
             std = [0.1980, 0.2010, 0.1970]
             self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]) if self.transform is None else self.transform
-            dst_train = datasets.MNIST(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
-            dst_test = datasets.MNIST(self.data_dir, train=False, download=True, transform=self.transform)
+            dst_train = datasets.SVHN(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
+            dst_test = datasets.SVHN(self.data_dir, train=False, download=True, transform=self.transform)
             class_names = [str(c) for c in range(num_classes)]
 
         elif self.dataset == 'CIFAR10':
@@ -94,8 +94,8 @@ class DataModule():
             mean = [0.4914, 0.4822, 0.4465]
             std = [0.2023, 0.1994, 0.2010]
             self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]) if self.transform is None else self.transform
-            dst_train = datasets.MNIST(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
-            dst_test = datasets.MNIST(self.data_dir, train=False, download=True, transform=self.transform)
+            dst_train = datasets.CIFAR10(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
+            dst_test = datasets.CIFAR10(self.data_dir, train=False, download=True, transform=self.transform)
             class_names = dst_train.classes
 
         elif self.dataset == 'CIFAR100':
@@ -105,8 +105,8 @@ class DataModule():
             mean = [0.4914, 0.4822, 0.4465]
             std = [0.2023, 0.1994, 0.2010]
             self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]) if self.transform is None else self.transform
-            dst_train = datasets.MNIST(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
-            dst_test = datasets.MNIST(self.data_dir, train=False, download=True, transform=self.transform)
+            dst_train = datasets.CIFAR100(self.data_dir, train=True, download=True, transform=self.transform) # no augmentation
+            dst_test = datasets.CIFAR100(self.data_dir, train=False, download=True, transform=self.transform)
             class_names = dst_train.classes
 
         else:
