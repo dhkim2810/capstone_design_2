@@ -1,3 +1,103 @@
+from nis import match
+import os
+import time
+import copy
+import numpy as np
+import wandb
+
+import torch
+import torch.nn as nn
+
+from data.data_module import DataModule
+from data.aug_module import AugmentModule
+from model.model_module import ModelModule
+import utils
+
+def main(args):
+    # Basic Setup
+    np.random.seed(0)
+    
+    # Directory Setup
+    
+    # Logging Setup
+    run_name = '-'.join(args.dataset, f'{args.ipc}ipc', args.arch, args.method, args.comment)
+    wandb.init(dir=args.save_dir, config=args, entity="dhk", project="capstone2",
+               tags=[args.dataset, args.arch, args.ipc], name=run_name,)
+    
+    ## CUDA Init
+    args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    args.device_count = torch.cuda.device_count()
+    print(f"Using CUDA : Device count : {args.device_count}")
+    
+    ## Dataset Config
+    dm = DataModule(args.data_dir, args.dataset)
+    dm_config = dm.get_dataset_config()
+    
+    ## Synthetic Dataset Config
+    image_syn = torch.randn(size=(dm_config['num_classes'] * args.ipc, dm_config['channel'], dm_config['im_size'][0], dm_config['im_size'][1]), dtype=torch.float, requires_grad=True, device=args.device)
+    label_syn = torch.cat([torch.ones(1,args.ipc, dtype=torch.long, device=args.device)*i for i in range(dm_config['num_classes'])])
+    optimizer_img = torch.optim.SGD([image_syn,], lr=args.lr_img, momentum=0.5)
+    optimizer_img.zero_grad()
+    
+    ## Training Configuration
+    args.outer_loop, args.inner_loop = utils.get_loops()
+    eval_iter_pool = np.arange(0,args.epochs,args.iter_eval).tolist() if args.eval_model == 'S' else [args.epochs]
+    model_eval_pool = utils.get_eval_pool(args.eval_mode, args.arch, args.arch)
+    
+    ## Start Training
+    for iter in range(args.epochs+1):
+        ''' Evaluate Synthetic Dataset '''
+        if iter in eval_iter_pool:
+            for model_eval in model_eval_pool:
+                epoch_eval, augment_eval = utils.get_eval_config(args)
+                aug_eval = AugmentModule(augment_eval)
+                for iter_eval in range(epoch_eval):
+                    net_eval = ModelModule(model_eval, aug_eval, dm_config['channel'], dm_config['num_classes'], dm_config['im_size'], args.__dict__)
+                    eval_syn_images, eval_syn_labels = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach())
+                    _, _ = net_eval.train_with_synthetic_data(eval_syn_images, eval_syn_labels, epoch_eval, lr_schedule=True)
+                    eval_test_loss, eval_test_acc = net_eval.test_with_synthetic_data(eval_syn_images, eval_syn_labels)
+        
+        
+        '''  Update Synthetic Dataset  '''
+        ## Model
+        model = ModelModule(args.model, dm_config['channel'], dm_config['num_classes'], dm_config['im_size'], args.device)
+
+        ## Outer Loop
+        log_matching_loss = 0.0
+        for ol in range(args.outer_loop):
+            ''' freeze the running MU and sigma for BN layers '''
+            BNSizePC = 32
+            img_real = torch.cat([dm.get_real_images(class_idx, BNSizePC) for class_idx in range(dm_config['num_classes'])], dim=0).to(args.device)
+            freeze = model.freeze_model_BN_layers(img_real, BNSizePC)
+            
+            ''' update synthetic dataset '''
+            matching_loss = torch.tensor(0.0).to(args.device)
+            for class_idx in range(dm_config['num_classes']):
+                img_real = dm.get_real_images(class_idx, args.batch_real)
+                label_real = class_idx * torch.ones((img_real.shape[0],), dtype=torch.long, device=args.device)
+                img_syn = image_syn[class_idx*args.ipc:(class_idx+1)*args.ipc].reshape((args.ipc, dm_config['channel'], dm_config['im_size'][0],dm_config['im_size'][1]))
+                label_syn = class_idx * torch.ones((img_real.shape[0],), dtype=torch.long, device=args.device)
+                
+                matching_loss += model.calculate_matching_loss(img_real, label_real, img_syn, label_syn)
+            optimizer_img.zero_grad()
+            matching_loss.backward()
+            optimizer_img.step()
+            log_matching_loss += matching_loss.item()
+            
+            ''' update network '''
+            train_syn_images, train_syn_labels = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach())
+            train_syn_losses, train_syn_accs = model.train_with_synthetic_data(train_syn_images, train_syn_labels, epochs=args.inner_loop, batch_size=args.batch_size_train, freeze=freeze)
+        log_matching_loss /= args.outer_loop
+        
+        # Log Data
+        wandb.log({
+            'Matching Loss' : log_matching_loss,
+            'Syn Train Loss' : train_syn_losses[-1],
+            'Syn Test Loss' : None,
+            'Syn Train Accuracy' : train_syn_accs[-1],
+            'Syn Test Accuracy' : None,
+        })
+
 # import os
 # import sys
 # import time
@@ -268,43 +368,43 @@
 #     config = parser.parse_args()
 #     main(config)
 
-import os
-import logging
-import numpy as np
-import pytorch_lightning as pl
-import logging
+# import os
+# import logging
+# import numpy as np
+# import pytorch_lightning as pl
+# import logging
 
-from data.data_module import DataModule
+# from data.data_module import DataModule
 
-def main(args):
-    # logger
-    run_name = "-".join([args.method, args.dataset, args.ipc, args.arch, args.comment])
-    wandb_logger = pl.loggers.WandbLogger(
-        save_dir=args.log_dir,
-        name=run_name,
-        project=args.project,
-        entity=args.entity,
-        offline=args.offline,
-    )
+# def main(args):
+#     # logger
+#     run_name = "-".join([args.method, args.dataset, args.ipc, args.arch, args.comment])
+#     wandb_logger = pl.loggers.WandbLogger(
+#         save_dir=args.log_dir,
+#         name=run_name,
+#         project=args.project,
+#         entity=args.entity,
+#         offline=args.offline,
+#     )
     
-    # build datamodule
-    augmentation = None
-    dm = DataModule(args.dataset, args.data_dir, args.batch_size, args.num_workers, augmentation)
+#     # build datamodule
+#     augmentation = None
+#     dm = DataModule(args.dataset, args.data_dir, args.batch_size, args.num_workers, augmentation)
 
-    # build model
-    model = Model(**args.__dict__)
+#     # build model
+#     model = Model(**args.__dict__)
     
-    # Train model
-    for exp in range(args.num_exp):
-        logging.info('\n================== Exp %d ==================\n '%exp)
-    trainer = pl.Trainer.from_argparse_args(
-        args, logger=wandb_logger, callbacks=[CheckpointCallback()], accelerator='dp'
-    )
-    trainer.fit(model, dm)
+#     # Train model
+#     for exp in range(args.num_exp):
+#         logging.info('\n================== Exp %d ==================\n '%exp)
+#     trainer = pl.Trainer.from_argparse_args(
+#         args, logger=wandb_logger, callbacks=[CheckpointCallback()], accelerator='dp'
+#     )
+#     trainer.fit(model, dm)
 
 
-if __name__ == "__main__":
-    parser = pl.Trainer.add_argparse_args(parser)
-    args = parser.parse_args()
+# if __name__ == "__main__":
+#     parser = pl.Trainer.add_argparse_args(parser)
+#     args = parser.parse_args()
 
-    main(args)
+#     main(args)
