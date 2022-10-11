@@ -5,11 +5,9 @@ from torchvision import datasets, transforms
 
 
 class DataModule():
-    def __init__(self, data_dir, dataset, **kwargs):
+    def __init__(self, data_dir, dataset):
         self.data_dir = data_dir
         self.dataset = getattr(datasets, dataset)
-        self.batch_size = kwargs.get('batch_size', 256)
-        self.num_workers = kwargs.get('num_workers', 4)
         self.prepare_data(dataset)
 
 

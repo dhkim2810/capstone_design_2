@@ -17,18 +17,17 @@ from .vgg import VGG
 from .resnet import ResNet18, ResNet18BN, ResNet18_AP, ResNet18BN_AP, ResNet34, ResNet50, ResNet101, ResNet152
 
 class ModelModule():
-    def __init__(self, model, aug_eval=None, channel=3, num_classes=10, img_size=(32,32), **kwargs):
+    def __init__(self, arch, aug_eval=None, dm_config=None, **kwargs):
         self.__dict__ = {k: v for (k, v) in kwargs.items() if not callable(v)}
-        self.model = model
         self.augmentation = aug_eval
-        self.channel = channel
-        self.num_classes = num_classes
-        self.img_size = img_size
-        self.set_model()
+        self.channel = dm_config['channel']
+        self.num_classes = dm_config['num_classes']
+        self.img_size = dm_config['img_size']
+        self.set_model(arch)
         self.net.train()
 
 
-    def set_model(self):
+    def set_model(self, arch):
         if self.model == 'MLP':
             self.net = MLP(self.channel, self.num_classes)
         elif self.model == 'LeNet':
@@ -49,7 +48,7 @@ class ModelModule():
         
         self.net.to(self.device)
         self.net_parameters = list(self.net.parameters())
-        self.optimizer_net = torch.optim.SGD(self.net.parameters(), lr=self.lr_net, momentum=self.opt_momentum, weight_decay=self.opt_wd)
+        self.optimizer_net = torch.optim.SGD(self.net.parameters(), lr=self.lr_net, momentum=0.9, weight_decay=0.0005)
         self.optimizer_net.zero_grad()
 
 
