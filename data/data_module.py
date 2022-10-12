@@ -85,3 +85,6 @@ class DataModule():
     def get_real_images(self, class_idx, n):
         idx_shuffle = np.random.permutation(self.labeled_data[class_idx].size(0))[:n]
         return self.labeled_data[class_idx][idx_shuffle]
+    
+    def get_datasets(self):
+        return self.dst_train, self.dst_test
