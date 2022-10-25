@@ -6,9 +6,8 @@ import argparse
 
 import torch
 
-from data.data_module import DataModule
-from data.aug_module import AugmentModule
-from model.model_module import ModelModule
+from data import AugmentModule, DataModule
+from model import ModelModule
 import utils
 
 def main(args):
@@ -24,9 +23,9 @@ def main(args):
         os.makedirs(args.save_dir)
     
     ## Logging Setup
-    run_name = '-'.join(args.method, args.dataset, f'{args.ipc}ipc', args.arch, args.comment)
-    wandb.init(dir=args.save_dir, config=args, entity="dhk", project="capstone2",
-               tags=[args.dataset, args.arch, args.ipc], name=run_name,)
+    # run_name = '-'.join(args.method, args.dataset, f'{args.ipc}ipc', args.arch, args.comment)
+    # wandb.init(dir=args.save_dir, config=args, entity="dhk", project="capstone2",
+    #            tags=[args.dataset, args.arch, args.ipc], name=run_name,)
     
     ## CUDA Init
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -51,32 +50,37 @@ def main(args):
     ## Start Training
     for iter in range(args.epochs+1):
         ''' Evaluate Synthetic Dataset '''
+        print("Eval Synthetic Dataset")
         if iter in eval_iter_pool:
             for model_eval in model_eval_pool:
                 epoch_eval_train = utils.get_eval_epoch(args)
                 aug_eval = AugmentModule(args, dm_config['im_size'])
                 for iter_eval in range(args.eval_num):
+                    print(f"Eval {iter_eval}")
                     net_eval = ModelModule(model_eval, aug_eval, dm_config, args.__dict__)
                     eval_syn_images, eval_syn_labels = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach())
                     _, _ = net_eval.train_with_synthetic_data(eval_syn_images, eval_syn_labels, epoch_eval_train, lr_schedule=True)
                     eval_test_loss, eval_test_acc = net_eval.test_with_synthetic_data(eval_syn_images, eval_syn_labels)
         
-        
         '''  Update Synthetic Dataset  '''
+        print("Update Synthetic Dataset")
         ## Augment
         augment = AugmentModule(args, dm_config['im_size'])
         
         ## Model
         model = ModelModule(args.model, augment, dm_config, args.__dict__)
         
+        print("Start training")
         ## Outer Loop
         log_matching_loss = 0.0
         for ol in range(args.outer_loop):
+            print("Freeze BN")
             ''' freeze the running MU and sigma for BN layers '''
             BNSizePC = 32
             img_real = torch.cat([dm.get_real_images(class_idx, BNSizePC) for class_idx in range(dm_config['num_classes'])], dim=0).to(args.device)
-            freeze = model.freeze_model_BN_layers(img_real, BNSizePC)
+            freeze = model.freeze_model_BN_layers(img_real)
             
+            print("Update Dataset")
             ''' update synthetic dataset '''
             matching_loss = torch.tensor(0.0).to(args.device)
             for class_idx in range(dm_config['num_classes']):
@@ -91,19 +95,20 @@ def main(args):
             optimizer_img.step()
             log_matching_loss += matching_loss.item()
             
+            print("Update Model")
             ''' update network '''
             train_syn_images, train_syn_labels = copy.deepcopy(image_syn.detach()), copy.deepcopy(label_syn.detach())
             train_syn_losses, train_syn_accs = model.train_with_synthetic_data(train_syn_images, train_syn_labels, epochs=args.inner_loop, batch_size=args.batch_size_train, freeze=freeze)
         log_matching_loss /= args.outer_loop
         
         # Log Data
-        wandb.log({
-            'Matching Loss' : log_matching_loss,
-            'Syn Train Loss' : train_syn_losses[-1],
-            'Syn Test Loss' : None,
-            'Syn Train Accuracy' : train_syn_accs[-1],
-            'Syn Test Accuracy' : None,
-        })
+        # wandb.log({
+        #     'Matching Loss' : log_matching_loss,
+        #     'Syn Train Loss' : train_syn_losses[-1],
+        #     'Syn Test Loss' : None,
+        #     'Syn Train Accuracy' : train_syn_accs[-1],
+        #     'Syn Test Accuracy' : None,
+        # })
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Parameter Processing')
@@ -118,9 +123,9 @@ if __name__ == "__main__":
     
     parser.add_argument('--epochs', type=int, default=1000, help='training iterations')
     parser.add_argument('--lr_img', type=float, default=0.1, help='learning rate for updating synthetic images')
-    parser.add_argument('--lr_img', type=float, default=0.01, help='learning rate for updating synthetic images')
-    parser.add_argument('--batch_real', type=int, default=256, help='batch size for real data')
-    parser.add_argument('--batch_train', type=int, default=256, help='batch size for training networks')
+    parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating synthetic images')
+    parser.add_argument('--lr_img_schedule', type=int, default=[1200,1400,1800], nargs='+')
+    parser.add_argument('--batch_size', type=int, default=256, help='batch size for real data')
     
     parser.add_argument('--eval_mode', type=str, default='S', help='eval_mode', choices=['S','M'])
     parser.add_argument('--iter_eval', type=int, default=20, help='the number of evaluating randomly initialized models')

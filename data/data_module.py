@@ -1,8 +1,8 @@
-import numpy as np
 
 import torch
 from torchvision import datasets, transforms
 
+import numpy as np
 
 class DataModule():
     def __init__(self, data_dir, dataset):
@@ -75,7 +75,7 @@ class DataModule():
             self.labeled_data[self.dst_train[i][1]].append(torch.unsqueeze(self.dst_train[i][0], dim=0))
         for class_idx, items in self.labeled_data.items():
             self.labeled_data[class_idx] = torch.cat(items, dim=0)
-        self.dataset_config = {'channel':channel,'im_size':im_size,'num_classes':num_classes,'class_names':class_names,'mean':mean,'std':std}
+        self.dataset_config = [channel,im_size,num_classes,class_names,mean,std]
 
 
     def get_dataset_config(self):
@@ -85,6 +85,7 @@ class DataModule():
     def get_real_images(self, class_idx, n):
         idx_shuffle = np.random.permutation(self.labeled_data[class_idx].size(0))[:n]
         return self.labeled_data[class_idx][idx_shuffle]
-    
+
+
     def get_datasets(self):
         return self.dst_train, self.dst_test

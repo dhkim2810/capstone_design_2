@@ -52,7 +52,7 @@ class ModelModule():
         self.optimizer_net.zero_grad()
 
 
-    def freeze_model_BN_layers(self, inputs, BNSizePC):
+    def freeze_model_BN_layers(self, inputs):
         BN_flag = False
         for module in self.net.modules():
             if 'BatchNorm' in module._get_name():
