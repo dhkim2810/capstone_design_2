@@ -12,7 +12,7 @@ from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_s
 def main():
 
     parser = argparse.ArgumentParser(description='Parameter Processing')
-    parser.add_argument('--method', type=str, default='DC', help='DC/DSA')
+    parser.add_argument('--method', type=str, default='DC', help='DC/DSA/Ours')
     parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset')
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
     parser.add_argument('--ipc', type=int, default=1, help='image(s) per class')
@@ -28,7 +28,7 @@ def main():
     parser.add_argument('--init', type=str, default='noise', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='None', help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
-    parser.add_argument('--save_path', type=str, default='result', help='path to save results')
+    parser.add_argument('--save_path', type=str, default='results', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
 
     args = parser.parse_args()
@@ -68,6 +68,7 @@ def main():
 
         images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
         labels_all = [dst_train[i][1] for i in range(len(dst_train))]
+        sub_labels_all = torch.load('./sub_class_index_layer2.pt')
         for i, lab in enumerate(labels_all):
             indices_class[lab].append(i)
         images_all = torch.cat(images_all, dim=0).to(args.device)
@@ -78,6 +79,12 @@ def main():
 
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
+            return images_all[idx_shuffle]
+        
+        def get_batches(c, n):
+            sub_class = np.random.randint(20)
+            sub_class_indices = sub_labels_all[c][sub_class]
+            idx_shuffle = np.random.permutation(sub_class_indices)[:n]
             return images_all[idx_shuffle]
 
         for ch in range(channel):
@@ -177,7 +184,7 @@ def main():
                 ''' update synthetic data '''
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
-                    img_real = get_images(c, args.batch_real)
+                    img_real = get_batches(c, args.batch_real)
                     lab_real = torch.ones((img_real.shape[0],), device=args.device, dtype=torch.long) * c
                     img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
                     lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
