@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--save_path', type=str, default='results', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
+    parser.add_argument('--layer_idx', type=int, default=1, help='layer of subclass')
 
     args = parser.parse_args()
     args.outer_loop, args.inner_loop = get_loops(args.ipc)
@@ -68,6 +69,7 @@ def main():
 
         images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
         labels_all = [dst_train[i][1] for i in range(len(dst_train))]
+        sub_labels_all = torch.load(os.path.join(args.save_path, f'sub_class_index_layer{args.layer_idx}.pt'))
         for i, lab in enumerate(labels_all):
             indices_class[lab].append(i)
         images_all = torch.cat(images_all, dim=0).to(args.device)
@@ -78,6 +80,12 @@ def main():
 
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
+            return images_all[idx_shuffle]
+        
+        def get_batches(c, n):
+            sub_class = np.random.randint(20)
+            sub_class_indices = sub_labels_all[c][sub_class]
+            idx_shuffle = np.random.permutation(sub_class_indices)[:n]
             return images_all[idx_shuffle]
 
         for ch in range(channel):
@@ -168,7 +176,7 @@ def main():
                 if BN_flag:
                     img_real = torch.cat([get_images(c, BNSizePC) for c in range(num_classes)], dim=0)
                     net.train() # for updating the mu, sigma of BatchNorm
-                    output_real = net(img_real) # get running mu, sigma
+                    output_real, _ = net(img_real) # get running mu, sigma
                     for module in net.modules():
                         if 'BatchNorm' in module._get_name():  #BatchNorm
                             module.eval() # fix mu and sigma of every BatchNorm layer
@@ -177,7 +185,7 @@ def main():
                 ''' update synthetic data '''
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
-                    img_real = get_images(c, args.batch_real)
+                    img_real = get_batches(c, args.batch_real)
                     lab_real = torch.ones((img_real.shape[0],), device=args.device, dtype=torch.long) * c
                     img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
                     lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
@@ -187,12 +195,12 @@ def main():
                         img_real = DiffAugment(img_real, args.dsa_strategy, seed=seed, param=args.dsa_param)
                         img_syn = DiffAugment(img_syn, args.dsa_strategy, seed=seed, param=args.dsa_param)
 
-                    output_real = net(img_real)
+                    output_real, _ = net(img_real)
                     loss_real = criterion(output_real, lab_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
 
-                    output_syn = net(img_syn)
+                    output_syn, _ = net(img_syn)
                     loss_syn = criterion(output_syn, lab_syn)
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
 
@@ -222,7 +230,7 @@ def main():
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_%d.pt'%(args.method, args.dataset, args.model, args.ipc, args.layer_idx)))
 
 
     print('\n==================== Final Results ====================\n')

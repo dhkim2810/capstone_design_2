@@ -1,10 +1,11 @@
 import os
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision as tv
 from torchvision import models, datasets
 
-data_dir = "./datasets"
+data_dir = "./dataset"
 result_dir = "./results"
 
 class BasicBlock(nn.Module):
@@ -51,7 +52,7 @@ class ResNet(nn.Module):
         strides = [stride] + [1]*(num_blocks-1)
         layers = []
         for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, self.norm))
+            layers.append(block(self.in_planes, planes, stride))
             self.in_planes = planes * block.expansion
         return nn.Sequential(*layers)
 
@@ -86,7 +87,7 @@ def main():
     dst_train = datasets.CIFAR10(data_dir, train=True, download=True, transform=transform) # no augmentation
     dst_test = datasets.CIFAR10(data_dir, train=False, download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(dst_train, batch_size=128, shuffle=True, num_workers=4, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(dst_test, batch_size=128, shuffle=False, num_workers=4)
+    test_loader = torch.utils.data.DataLoader(dst_test, batch_size=256, shuffle=False, num_workers=4)
     
     # Model
     net = resnet18(3,10)
@@ -97,11 +98,11 @@ def main():
         net = net.to(device)
     
     # Configuration
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss().to(device)
     optimizer = torch.optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
     
     # Train
-    num_epochs = 200
+    num_epochs = 20
     for epoch in range(num_epochs):
         net.train()
         epoch_loss = 0.0
@@ -126,9 +127,10 @@ def main():
             labels = labels.to(device)
             
             outputs = net(inputs)
-            correct += (outputs == labels).sum().item()
+            _, pred = outputs.max(1)
+            correct += pred.eq(labels).sum().item()
             total += labels.size(0)
-        acc = correct/total
+        acc = correct/total*100
         if epoch % 5 == 0:
             print(f"[{epoch}/{num_epochs}] Train Loss : {epoch_loss:.4}\tTest Acc : {acc:2.2f}")
     

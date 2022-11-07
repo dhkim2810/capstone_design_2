@@ -27,7 +27,7 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
         lab = datum[1].long().to(args.device)
         n_b = lab.shape[0]
 
-        output = net(img)
+        output, _ = net(img)
         loss = criterion(output, lab)
         acc = np.sum(np.equal(np.argmax(output.cpu().data.numpy(), axis=-1), lab.cpu().data.numpy()))
 

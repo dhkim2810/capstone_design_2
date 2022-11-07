@@ -197,15 +197,6 @@ def get_network(model, channel, num_classes, im_size=(32, 32)):
         net = None
         exit('unknown model: %s'%model)
 
-    gpu_num = torch.cuda.device_count()
-    if gpu_num>0:
-        device = 'cuda'
-        if gpu_num>1:
-            net = nn.DataParallel(net)
-    else:
-        device = 'cpu'
-    net = net.to(device)
-
     return net
 
 
