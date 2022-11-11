@@ -168,7 +168,7 @@ def main():
                 if BN_flag:
                     img_real = torch.cat([get_images(c, BNSizePC) for c in range(num_classes)], dim=0)
                     net.train() # for updating the mu, sigma of BatchNorm
-                    output_real = net(img_real) # get running mu, sigma
+                    output_real, _ = net(img_real) # get running mu, sigma
                     for module in net.modules():
                         if 'BatchNorm' in module._get_name():  #BatchNorm
                             module.eval() # fix mu and sigma of every BatchNorm layer
@@ -187,12 +187,12 @@ def main():
                         img_real = DiffAugment(img_real, args.dsa_strategy, seed=seed, param=args.dsa_param)
                         img_syn = DiffAugment(img_syn, args.dsa_strategy, seed=seed, param=args.dsa_param)
 
-                    output_real = net(img_real)
+                    output_real, _ = net(img_real)
                     loss_real = criterion(output_real, lab_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
 
-                    output_syn = net(img_syn)
+                    output_syn, _ = net(img_syn)
                     loss_syn = criterion(output_syn, lab_syn)
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
 
