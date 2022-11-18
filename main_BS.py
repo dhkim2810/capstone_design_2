@@ -17,7 +17,7 @@ def main():
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
     parser.add_argument('--ipc', type=int, default=1, help='image(s) per class')
     parser.add_argument('--eval_mode', type=str, default='S', help='eval_mode') # S: the same to training model, M: multi architectures,  W: net width, D: net depth, A: activation function, P: pooling layer, N: normalization layer,
-    parser.add_argument('--num_exp', type=int, default=5, help='the number of experiments')
+    parser.add_argument('--num_exp', type=int, default=1, help='the number of experiments')
     parser.add_argument('--num_eval', type=int, default=20, help='the number of evaluating randomly initialized models')
     parser.add_argument('--epoch_eval_train', type=int, default=300, help='epochs to train a model with synthetic data')
     parser.add_argument('--Iteration', type=int, default=1000, help='training iterations')
@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--save_path', type=str, default='results', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
     parser.add_argument('--layer_idx', type=int, default=1, help='layer of subclass')
+    parser.add_argument('--mix', action='store_true', default=False,help='mix batch sampling method')
 
     args = parser.parse_args()
     args.outer_loop, args.inner_loop = get_loops(args.ipc)
@@ -55,7 +56,7 @@ def main():
         accs_all_exps[key] = []
 
     data_save = []
-
+    loss_save = []
 
     for exp in range(args.num_exp):
         print('\n================== Exp %d ==================\n '%exp)
@@ -105,6 +106,7 @@ def main():
 
 
         ''' training '''
+        loss_log = []
         optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_img.zero_grad()
         criterion = nn.CrossEntropyLoss().to(args.device)
@@ -142,7 +144,7 @@ def main():
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'vis_BS_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
+                save_name = os.path.join(args.save_path, 'BS_condense_result','vis_BS_%s_%s_%s_%dipc_mix_%s_layer%d_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.layer_idx, exp, it))
                 image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
                 for ch in range(channel):
                     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
@@ -185,7 +187,7 @@ def main():
                 ''' update synthetic data '''
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
-                    img_real = get_batches(c, args.batch_real)
+                    img_real = get_images(c, args.batch_real) if args.mix and it > 300 else get_batches(c, args.batch_real)
                     lab_real = torch.ones((img_real.shape[0],), device=args.device, dtype=torch.long) * c
                     img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
                     lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
@@ -224,13 +226,14 @@ def main():
 
 
             loss_avg /= (num_classes*args.outer_loop)
-
+            loss_log.append(loss_avg)
             if it%10 == 0:
                 print('%s iter = %04d, loss = %.4f' % (get_time(), it, loss_avg))
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_%d.pt'%(args.method, args.dataset, args.model, args.ipc, args.layer_idx)))
+                loss_save.append(loss_log)
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'logs':loss_save }, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_mix_%s_%d.pt'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.layer_idx)))
 
 
     print('\n==================== Final Results ====================\n')
