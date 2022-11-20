@@ -14,19 +14,9 @@ do
     for layer in 1 2 3
     do
         python main_BS.py --dataset CIFAR10 --model ConvNet  --ipc $ipc \
-            --data_path /local_datasets/ --layer_idx $layer \
-            --save_path /data/dhkim2810/capstone/capstone_design_2/results
-    done
-done
-
-for ipc in 1 10 50
-do
-    for layer in 1 2 3
-    do
-        python main_BS.py --dataset CIFAR10 --model ConvNet  --ipc $ipc  --init real  --method DSA \
-            --dsa_strategy color_crop_cutout_flip_scale_rotate \
-            --data_path /local_datasets/ --layer_idx $layer \
-            --save_path /data/dhkim2810/capstone/capstone_design_2/results
+            --data_path /local_datasets/ --layer_idx $layer --norm \
+            --save_path /data/dhkim2810/capstone/capstone_design_2/results \
+            --cluster_path /data/dhkim2810/capstone/capstone_design_2/clustering
     done
 done
 # letting slurm know this code finished without any problem

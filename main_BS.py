@@ -29,9 +29,12 @@ def main():
     parser.add_argument('--dsa_strategy', type=str, default='None', help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--save_path', type=str, default='results', help='path to save results')
+    parser.add_argument('--cluster_path', type=str, default='clustering', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
     parser.add_argument('--layer_idx', type=int, default=1, help='layer of subclass')
     parser.add_argument('--mix', action='store_true', default=False,help='mix batch sampling method')
+    parser.add_argument('--num_cluster', type=int, default=20)
+    parser.add_argument('--norm', action='store_true', default=True)
 
     args = parser.parse_args()
     args.outer_loop, args.inner_loop = get_loops(args.ipc)
@@ -57,6 +60,7 @@ def main():
 
     data_save = []
     loss_save = []
+    act_save = []
 
     for exp in range(args.num_exp):
         print('\n================== Exp %d ==================\n '%exp)
@@ -70,7 +74,7 @@ def main():
 
         images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
         labels_all = [dst_train[i][1] for i in range(len(dst_train))]
-        sub_labels_all = torch.load(os.path.join(args.save_path, f'sub_class_index_layer{args.layer_idx}.pt'))
+        sub_labels_all = torch.load(os.path.join(args.cluster_path, f'class_idx_cifar10_k{args.num_cluster}_{args.layer_idx}_{str(args.norm)}.pt'))
         for i, lab in enumerate(labels_all):
             indices_class[lab].append(i)
         images_all = torch.cat(images_all, dim=0).to(args.device)
@@ -91,6 +95,9 @@ def main():
 
         for ch in range(channel):
             print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
+        
+        def get_gradient(gw):
+            return gw.sum().item()
 
 
         ''' initialize the synthetic data '''
@@ -107,6 +114,7 @@ def main():
 
         ''' training '''
         loss_log = []
+        gw_log = {'real':[], 'syn':[]}
         optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_img.zero_grad()
         criterion = nn.CrossEntropyLoss().to(args.device)
@@ -144,14 +152,13 @@ def main():
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'BS_condense_result','vis_BS_%s_%s_%s_%dipc_mix_%s_layer%d_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.layer_idx, exp, it))
+                save_name = os.path.join(args.save_path, 'BS_condense_result','vis_BS_%s_%s_%s_%dipc_mix_%s_k%d_layer%d_norm_%s_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.num_cluster, args.layer_idx, args.norm, exp, it))
                 image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
                 for ch in range(channel):
                     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
                 image_syn_vis[image_syn_vis<0] = 0.0
                 image_syn_vis[image_syn_vis>1] = 1.0
                 save_image(image_syn_vis, save_name, nrow=args.ipc) # Trying normalize = True/False may get better visual effects.
-
 
             ''' Train synthetic data '''
             net = get_network(args.model, channel, num_classes, im_size).to(args.device) # get a random model
@@ -162,7 +169,8 @@ def main():
             loss_avg = 0
             args.dc_aug_param = None  # Mute the DC augmentation when learning synthetic data (in inner-loop epoch function) in oder to be consistent with DC paper.
 
-
+            gw_real_log = []
+            gw_syn_log = []
             for ol in range(args.outer_loop):
 
                 ''' freeze the running mu and sigma for BatchNorm layers '''
@@ -185,6 +193,8 @@ def main():
 
 
                 ''' update synthetic data '''
+                gw_real_sums = []
+                gw_syn_sums = []
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
                     img_real = get_images(c, args.batch_real) if args.mix and it > 300 else get_batches(c, args.batch_real)
@@ -201,12 +211,16 @@ def main():
                     loss_real = criterion(output_real, lab_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
+                    gw_real_sums.append(np.array(list(map(get_gradient, gw_real))))
 
                     output_syn, _ = net(img_syn)
                     loss_syn = criterion(output_syn, lab_syn)
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
+                    gw_syn_sums.append(np.array(list(map(get_gradient, gw_syn))))
 
                     loss += match_loss(gw_syn, gw_real, args)
+                gw_real_log.append(np.mean(np.vstack(gw_real_sums), axis=0))
+                gw_syn_log.append(np.mean(np.vstack(gw_syn_sums), axis=0))
 
                 optimizer_img.zero_grad()
                 loss.backward()
@@ -227,13 +241,20 @@ def main():
 
             loss_avg /= (num_classes*args.outer_loop)
             loss_log.append(loss_avg)
+            
+            gw_log['real'].append(np.mean(np.vstack(gw_real_log), axis=0))
+            gw_log['syn'].append(np.mean(np.vstack(gw_syn_log), axis=0))
+            
             if it%10 == 0:
                 print('%s iter = %04d, loss = %.4f' % (get_time(), it, loss_avg))
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
                 loss_save.append(loss_log)
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'logs':loss_save }, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_mix_%s_%d.pt'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.layer_idx)))
+                gw_log['real'] = np.stack(gw_log['real']).transpose()
+                gw_log['syn'] = np.stack(gw_log['syn']).transpose()
+                act_save.append(gw_log)
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'logs':loss_save, 'act':act_save}, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_mix_%s_k%d_%d_norm_%s.pt'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.num_cluster, args.layer_idx, args.norm)))
 
 
     print('\n==================== Final Results ====================\n')

@@ -54,7 +54,8 @@ def main():
         accs_all_exps[key] = []
 
     data_save = []
-
+    loss_save = []
+    act_save = []
 
     for exp in range(args.num_exp):
         print('\n================== Exp %d ==================\n '%exp)
@@ -97,6 +98,8 @@ def main():
 
 
         ''' training '''
+        loss_log = []
+        gw_log = {'real':[], 'syn':[]}
         optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_img.zero_grad()
         criterion = nn.CrossEntropyLoss().to(args.device)
@@ -152,7 +155,8 @@ def main():
             loss_avg = 0
             args.dc_aug_param = None  # Mute the DC augmentation when learning synthetic data (in inner-loop epoch function) in oder to be consistent with DC paper.
 
-
+            gw_real_log = []
+            gw_syn_log = []
             for ol in range(args.outer_loop):
 
                 ''' freeze the running mu and sigma for BatchNorm layers '''
@@ -175,6 +179,8 @@ def main():
 
 
                 ''' update synthetic data '''
+                gw_real_sums = []
+                gw_syn_sums = []
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
                     img_real = get_images(c, args.batch_real)
@@ -191,13 +197,18 @@ def main():
                     loss_real = criterion(output_real, lab_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
+                    gw_real_sums.append(np.array(list(map(get_gradient, gw_real))))
 
                     output_syn, _ = net(img_syn)
                     loss_syn = criterion(output_syn, lab_syn)
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
+                    gw_syn_sums.append(np.array(list(map(get_gradient, gw_syn))))
 
                     loss += match_loss(gw_syn, gw_real, args)
-
+                
+                gw_real_log.append(np.mean(np.vstack(gw_real_sums), axis=0))
+                gw_syn_log.append(np.mean(np.vstack(gw_syn_sums), axis=0))
+                
                 optimizer_img.zero_grad()
                 loss.backward()
                 optimizer_img.step()
@@ -216,13 +227,21 @@ def main():
 
 
             loss_avg /= (num_classes*args.outer_loop)
+            loss_log.append(loss_avg)
+            
+            gw_log['real'].append(np.mean(np.vstack(gw_real_log), axis=0))
+            gw_log['syn'].append(np.mean(np.vstack(gw_syn_log), axis=0))
 
             if it%10 == 0:
                 print('%s iter = %04d, loss = %.4f' % (get_time(), it, loss_avg))
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_RN_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                loss_save.append(loss_log)
+                gw_log['real'] = np.stack(gw_log['real']).transpose()
+                gw_log['syn'] = np.stack(gw_log['syn']).transpose()
+                act_save.append(gw_log)
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'logs':loss_save, 'act':act_save }, os.path.join(args.save_path, 'res_RN_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
 
     print('\n==================== Final Results ====================\n')
