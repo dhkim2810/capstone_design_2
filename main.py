@@ -42,6 +42,8 @@ def main():
 
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
+        if not os.path.exists(os.path.join(args.save_path, 'RN_condense_result')):
+            os.mkdir(os.path.join(args.save_path, 'RN_condense_result'))
 
     eval_it_pool = np.arange(0, args.Iteration+1, 500).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
@@ -100,6 +102,7 @@ def main():
         ''' training '''
         loss_log = []
         gw_log = {'real':[], 'syn':[]}
+        norm = lambda x : x.norm().item()
         optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_img.zero_grad()
         criterion = nn.CrossEntropyLoss().to(args.device)
@@ -197,12 +200,12 @@ def main():
                     loss_real = criterion(output_real, lab_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
-                    gw_real_sums.append(np.array(list(map(get_gradient, gw_real))))
+                    gw_real_sums.append(np.array(list(map(norm, gw_real))))
 
                     output_syn, _ = net(img_syn)
                     loss_syn = criterion(output_syn, lab_syn)
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
-                    gw_syn_sums.append(np.array(list(map(get_gradient, gw_syn))))
+                    gw_syn_sums.append(np.array(list(map(norm, gw_syn))))
 
                     loss += match_loss(gw_syn, gw_real, args)
                 
@@ -241,7 +244,7 @@ def main():
                 gw_log['real'] = np.stack(gw_log['real']).transpose()
                 gw_log['syn'] = np.stack(gw_log['syn']).transpose()
                 act_save.append(gw_log)
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'logs':loss_save, 'act':act_save }, os.path.join(args.save_path, 'res_RN_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'loss':loss_save, 'act':act_save }, os.path.join(args.save_path, 'res_RN_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
 
     print('\n==================== Final Results ====================\n')

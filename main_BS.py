@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.utils import save_image
-from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, attention_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
 
 
 def main():
@@ -47,6 +47,8 @@ def main():
 
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
+        if not os.path.exists(os.path.join(args.save_path, 'BN_condense_result')):
+            os.mkdir(os.path.join(args.save_path, 'BN_condense_result'))
 
     eval_it_pool = np.arange(0, args.Iteration+1, 500).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
@@ -96,10 +98,6 @@ def main():
         for ch in range(channel):
             print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
         
-        def get_gradient(gw):
-            return gw.sum().item()
-
-
         ''' initialize the synthetic data '''
         image_syn = torch.randn(size=(num_classes*args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
         label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
@@ -111,10 +109,10 @@ def main():
         else:
             print('initialize synthetic data from random noise')
 
-
         ''' training '''
         loss_log = []
         gw_log = {'real':[], 'syn':[]}
+        norm = lambda x : x.norm().item()
         optimizer_img = torch.optim.SGD([image_syn, ], lr=args.lr_img, momentum=0.5) # optimizer_img for synthetic data
         optimizer_img.zero_grad()
         criterion = nn.CrossEntropyLoss().to(args.device)
@@ -211,12 +209,12 @@ def main():
                     loss_real = criterion(output_real, lab_real)
                     gw_real = torch.autograd.grad(loss_real, net_parameters)
                     gw_real = list((_.detach().clone() for _ in gw_real))
-                    gw_real_sums.append(np.array(list(map(get_gradient, gw_real))))
+                    gw_real_sums.append(np.array(list(map(norm, gw_real))))
 
                     output_syn, _ = net(img_syn)
                     loss_syn = criterion(output_syn, lab_syn)
                     gw_syn = torch.autograd.grad(loss_syn, net_parameters, create_graph=True)
-                    gw_syn_sums.append(np.array(list(map(get_gradient, gw_syn))))
+                    gw_syn_sums.append(np.array(list(map(norm, gw_syn))))
 
                     loss += match_loss(gw_syn, gw_real, args)
                 gw_real_log.append(np.mean(np.vstack(gw_real_sums), axis=0))
@@ -254,7 +252,7 @@ def main():
                 gw_log['real'] = np.stack(gw_log['real']).transpose()
                 gw_log['syn'] = np.stack(gw_log['syn']).transpose()
                 act_save.append(gw_log)
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'logs':loss_save, 'act':act_save}, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_mix_%s_k%d_%d_norm_%s.pt'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.num_cluster, args.layer_idx, args.norm)))
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'loss':loss_save, 'act':act_save}, os.path.join(args.save_path, 'res_BS_%s_%s_%s_%dipc_mix_%s_k%d_%d_norm_%s.pt'%(args.method, args.dataset, args.model, args.ipc, args.mix, args.num_cluster, args.layer_idx, args.norm)))
 
 
     print('\n==================== Final Results ====================\n')
