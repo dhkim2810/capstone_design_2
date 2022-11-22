@@ -42,8 +42,7 @@ def main():
 
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
-        if not os.path.exists(os.path.join(args.save_path, 'RN_condense_result')):
-            os.mkdir(os.path.join(args.save_path, 'RN_condense_result'))
+        os.mkdir(os.path.join(args.save_path,'RN_condense_result'))
 
     eval_it_pool = np.arange(0, args.Iteration+1, 500).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
