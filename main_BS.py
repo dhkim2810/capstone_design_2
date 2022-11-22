@@ -89,7 +89,7 @@ def main():
             return images_all[idx_shuffle]
         
         def get_batches(c, n):
-            sub_class = np.random.randint(20)
+            sub_class = np.random.randint(args.num_cluster)
             sub_class_indices = sub_labels_all[c][sub_class]
             idx_shuffle = np.random.permutation(sub_class_indices)[:n]
             return images_all[idx_shuffle]
