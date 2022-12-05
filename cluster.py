@@ -1,5 +1,4 @@
 import os
-import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,13 +6,12 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision import datasets, transforms
+from torchvision.models import resnet18
 
 # K-Means
 from sklearn.manifold import TSNE
 from sklearn.cluster import KMeans
 from k_means_constrained import KMeansConstrained
-from sklearn.decomposition import PCA
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -77,47 +75,28 @@ class ResNet(nn.Module):
 def ResNet18(channel, num_classes):
     return ResNet(BasicBlock, [2,2,2,2], channel=channel, num_classes=num_classes, norm='batchnorm')
 
-def main():
-    parser = argparse.ArgumentParser(description='Parameter Processing')
-    parser.add_argument('--iteration', type=int, default=20, help='training iterations')
-    parser.add_argument('--data_path', type=str, default='dataset', help='dataset path')
-    parser.add_argument('--cluster_path', type=str, default='clustering', help='path to save results')
-    parser.add_argument('--layer_idx', type=int, default=1, help='layer of subclass')
-    parser.add_argument('--num_cluster', type=int, default=20)
-    parser.add_argument('--norm', action='store_true', default=False)
-    parser.add_argument('--viz', action='store_true', default=False)
-    args = parser.parse_args()
+def cluster(data, num_cluster, layer_idx, norm, cluster_path, iteration=1000, viz=True):
     
     # Directory Setup
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    # Data
-    ''' organize the real dataset '''
-    mean = [0.4914, 0.4822, 0.4465]
-    std = [0.2023, 0.1994, 0.2010]
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
-    dst_train = datasets.CIFAR10(args.data_path, train=True, download=True, transform=transform) # no augmentation
-    class_names = dst_train.classes
-
-    images_all = []
-    labels_all = []
-    indices_class = [[] for c in range(10)]
-
-    images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
-    labels_all = [dst_train[i][1] for i in range(len(dst_train))]
-    for i, lab in enumerate(labels_all):
-        indices_class[lab].append(i)
-    images_all = torch.cat(images_all, dim=0).to(device)
-    labels_all = torch.tensor(labels_all, dtype=torch.long, device=device)
-
-    def get_images(c, n): # get random n images from class c
-        idx_shuffle = np.random.permutation(indices_class[c])[:n]
-        return images_all[idx_shuffle]
+    if not os.path.exists(cluster_path):
+        os.mkdir(cluster_path)
+    
+    # data
+    images_all, labels_all, indices_class, class_names = data
 
     # Model
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     net = ResNet18(3, 10)
-    state_dict = torch.load(os.path.join(args.cluster_path, "resnet18_cifar.pt"), map_location='cpu')
-    net.load_state_dict(state_dict)
+    state_dict_path = os.path.join(cluster_path, "resnet18_cifar.pt")
+    if not os.path.exists(state_dict_path):
+        tmp_resnet18 = resnet18(pretrained=True)
+        state_dict = tmp_resnet18.state_dict()
+        del state_dict['conv1.weight'], state_dict['fc.weight'], state_dict['fc.bias']
+        net.load_state_dict(state_dict)
+        torch.save(net.state_dict(), state_dict_path)
+    else:
+        state_dict = torch.load(state_dict_path, map_location='cpu')
+        net.load_state_dict(state_dict)
     net = net.to(device)
     net.eval()
     
@@ -128,26 +107,26 @@ def main():
     
     for class_idx in range(10):
         class_name = class_names[class_idx]
-        batch_size = int(len(indices_class[class_idx]) / args.iteration)
-        cluster_size = int(len(indices_class[class_idx]) / args.num_cluster)
+        batch_size = int(len(indices_class[class_idx]) / iteration)
+        cluster_size = int(len(indices_class[class_idx]) / num_cluster)
         
         features = []
         print(f"Gathering features for class {class_name}")
-        for it in range(args.iteration):
+        for it in range(iteration):
             imgs = images_all[indices_class[class_idx][it*batch_size:(it+1)*batch_size]]
             _, _feature = net(imgs)
-            features.append(F.avg_pool2d(_feature[args.layer_idx], (_feature[args.layer_idx].shape[2],_feature[args.layer_idx].shape[3])).squeeze())
+            features.append(F.avg_pool2d(_feature[layer_idx], (_feature[layer_idx].shape[2],_feature[layer_idx].shape[3])).squeeze())
         features = torch.cat(features, dim=0).detach().cpu().numpy()
         
         print(f"Calculating cluster center features for class {class_name}")
-        if args.norm:
+        if norm:
             
-            clf = KMeansConstrained(n_clusters=args.num_cluster, size_min=cluster_size-50, size_max=cluster_size+50, random_state=1)
+            clf = KMeansConstrained(n_clusters=num_cluster, size_min=cluster_size-50, size_max=cluster_size+50, random_state=1)
             clf.fit(features)
             labels = clf.labels_
             centers = clf.cluster_centers_
         else:
-            kmeans = KMeans(n_clusters=args.num_cluster, n_init=5, max_iter=300, random_state=1, verbose=0).fit(features)
+            kmeans = KMeans(n_clusters=num_cluster, n_init=5, max_iter=300, random_state=1, verbose=0).fit(features)
             labels = kmeans.labels_
             centers = kmeans.cluster_centers_
         
@@ -159,16 +138,16 @@ def main():
         centers = feature_embedded[5000:,:]
         
         df = pd.DataFrame(dict(x1=feature[:,0], x2=feature[:,1], label=labels))
-        cdict = {i:plt.cm.tab20(i) for i in range(args.num_cluster)}
+        cdict = {i:plt.cm.tab20(i) for i in range(num_cluster)}
 
-        if args.viz:
+        if viz:
             fig, ax = plt.subplots(figsize=(10,6))
             grouped = df.groupby('label')
             for key, group in grouped:
                 group.plot(ax=ax, kind='scatter', x='x1',y='x2',color=cdict[key])
-            fig.suptitle(f"CIFAR10 \"{class_name} Class\" Kmeans Clustering - k={args.num_cluster}")
-            fig_name = os.path.join(args.cluster_path, f"Viz/cifar10_k{args.num_cluster}_{args.layer_idx}_{class_name}")
-            if args.norm:
+            fig.suptitle(f"CIFAR10 \"{class_name} Class\" Kmeans Clustering - k={num_cluster}")
+            fig_name = os.path.join(cluster_path, f"Viz/cifar10_k{num_cluster}_{layer_idx}_{class_name}")
+            if norm:
                 fig_name += '_norm'
             plt.savefig(fig_name)
             plt.clf()
@@ -181,7 +160,5 @@ def main():
                 sub_class_index[class_idx][sub] = [orig]
             else:
                 sub_class_index[class_idx][sub].append(orig)
-    torch.save(sub_class_index, os.path.join(args.cluster_path, f"class_idx_cifar10_k{args.num_cluster}_{args.layer_idx}_{args.norm}.pt"))
-
-if __name__=="__main__":
-    main()
+    torch.save(sub_class_index, os.path.join(cluster_path, f"class_idx_cifar10_k{num_cluster}_{layer_idx}_{norm}.pt"))
+    return sub_class_index

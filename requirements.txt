@@ -1,0 +1,6 @@
+numpy
+scipy
+torch
+torchvision
+sklearn
+k_means_constrained

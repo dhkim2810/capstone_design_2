@@ -6,13 +6,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.utils import save_image
-from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, attention_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+from cluster import cluster
 
 
 def main():
 
     parser = argparse.ArgumentParser(description='Parameter Processing')
-    parser.add_argument('--method', type=str, default='DC', help='DC/DSA/Ours')
+    parser.add_argument('--method', type=str, default='DC', help='DC/DSA/BS')
     parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset')
     parser.add_argument('--model', type=str, default='ConvNet', help='model')
     parser.add_argument('--ipc', type=int, default=1, help='image(s) per class')
@@ -27,9 +28,13 @@ def main():
     parser.add_argument('--batch_train', type=int, default=256, help='batch size for training networks')
     parser.add_argument('--init', type=str, default='noise', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='None', help='differentiable Siamese augmentation strategy')
+    parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--save_path', type=str, default='results', help='path to save results')
-    parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
+    parser.add_argument('--cluster_path', type=str, default='clustering', help='path to save results')
+    parser.add_argument('--layer_idx', type=int, default=1, help='layer of subclass')
+    parser.add_argument('--num_cluster', type=int, default=20)
+    parser.add_argument('--norm', action='store_true', default=True)
 
     args = parser.parse_args()
     args.outer_loop, args.inner_loop = get_loops(args.ipc)
@@ -42,7 +47,8 @@ def main():
 
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
-        os.mkdir(os.path.join(args.save_path,'RN_condense_result'))
+        condense_path = os.path.join(args.save_path, '%s_condense_result'%args.method)
+        os.mkdir(condense_path)
 
     eval_it_pool = np.arange(0, args.Iteration+1, 500).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
@@ -62,7 +68,7 @@ def main():
         print('\n================== Exp %d ==================\n '%exp)
         print('Hyper-parameters: \n', args.__dict__)
         print('Evaluation model pool: ', model_eval_pool)
-
+        
         ''' organize the real dataset '''
         images_all = []
         labels_all = []
@@ -74,12 +80,26 @@ def main():
             indices_class[lab].append(i)
         images_all = torch.cat(images_all, dim=0).to(args.device)
         labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
+        
+        ''' organize clusters '''
+        cluster_type = f'class_idx_cifar10_k{args.num_cluster}_{args.layer_idx}_{str(args.norm)}.pt'
+        cluster_data = os.path.join(args.cluster_path, cluster_type)
+        if os.path.exists(cluster_data):
+            sub_labels_all = torch.load(cluster_data)
+        else:
+            sub_labels_all = cluster((images_all, labels_all, indices_class, class_names), args.num_cluster, args.layer_idx, args.norm, args.cluster_path)
 
         for c in range(num_classes):
             print('class c = %d: %d real images'%(c, len(indices_class[c])))
 
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
+            return images_all[idx_shuffle]
+
+        def get_batches(c, n):
+            sub_class = np.random.randint(args.num_cluster)
+            sub_class_indices = sub_labels_all[c][sub_class]
+            idx_shuffle = np.random.permutation(sub_class_indices)[:n]
             return images_all[idx_shuffle]
 
         for ch in range(channel):
@@ -139,7 +159,7 @@ def main():
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'RN_condense_result','vis_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
+                save_name = os.path.join(condense_path,'vis_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
                 image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
                 for ch in range(channel):
                     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
@@ -185,7 +205,7 @@ def main():
                 gw_syn_sums = []
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
-                    img_real = get_images(c, args.batch_real)
+                    img_real = get_batches(c, args.batch_real) if args.method == 'BS' else get_images(c, args.batch_real)
                     lab_real = torch.ones((img_real.shape[0],), device=args.device, dtype=torch.long) * c
                     img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
                     lab_syn = torch.ones((args.ipc,), device=args.device, dtype=torch.long) * c
@@ -243,7 +263,7 @@ def main():
                 gw_log['real'] = np.stack(gw_log['real']).transpose()
                 gw_log['syn'] = np.stack(gw_log['syn']).transpose()
                 act_save.append(gw_log)
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'loss':loss_save, 'act':act_save }, os.path.join(args.save_path, 'res_RN_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps,'loss':loss_save, 'act':act_save }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
 
     print('\n==================== Final Results ====================\n')

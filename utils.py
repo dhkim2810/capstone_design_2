@@ -261,18 +261,6 @@ def match_loss(gw_syn, gw_real, args):
 
     return dis
 
-def attention_loss(features_real, features_syn, args):
-    loss = 0.0
-    
-    keys = features_real.keys()
-    for key in keys:
-        f_real, f_syn = features_real[key], features_syn[key]
-        N, M = f_real.size(0), f_syn.size(0)
-        _, idx = f_real.pow(2).sum((1,2,3)).topk(M)
-        f_real = f_real[idx]
-        
-    return None
-
 def get_loops(ipc):
     # Get the two hyper-parameters of outer-loop and inner-loop.
     # The following values are empirically good.
@@ -292,7 +280,6 @@ def get_loops(ipc):
         outer_loop, inner_loop = 0, 0
         exit('loop hyper-parameters are not defined for %d ipc'%ipc)
     return outer_loop, inner_loop
-
 
 
 def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
@@ -332,8 +319,6 @@ def epoch(mode, dataloader, net, optimizer, criterion, args, aug):
     acc_avg /= num_exp
 
     return loss_avg, acc_avg
-
-
 
 def evaluate_synset(it_eval, net, images_train, labels_train, testloader, args):
     net = net.to(args.device)
